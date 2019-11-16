@@ -21,10 +21,18 @@ except:
 
 
 class Conf():
-    ORM_HOST = "mysql+pymysql://xxxxxx"
-    ORM_TABLE_REPLICATION = 2
 
     @property
     def map_code(self):
         """数据字典"""
         return {}
+
+    @property
+    def ORM_HOST(self):
+        """orm host参数"""
+        return "mysql+pymysql://xxxx"
+
+    @property
+    def ORM_TABLE_REPLICATION(self):
+        """orm 表备份数"""
+        return 2
