@@ -131,9 +131,9 @@ try:
     sys.path.append("%s/" % cur_dir)
     from config import Conf
 
-    host = Conf.ORM_HOST
-    map_code = Conf.map_code
-    table_replication = Conf.ORM_TABLE_REPLICATION
+    host = Conf().ORM_HOST
+    map_code = Conf().map_code
+    table_replication = Conf().ORM_TABLE_REPLICATION
 except:
     # raise Exception("同级目录缺少配置文件config.py---[ORM_HOST,map_code,ORM_TABLE_REPLICATION]")
     host = "mysql+pymysql://xxx"
