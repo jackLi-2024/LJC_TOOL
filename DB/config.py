@@ -36,3 +36,14 @@ class Conf():
     def ORM_TABLE_REPLICATION(self):
         """orm 表备份数"""
         return 2
+    
+    @property
+    def MONGO_HOST(self):
+        conf = {
+            "host": "xx",
+            "port": 27017,
+            "auth_user": "xxxx",
+            "auth_password": "xxxx",
+            "auth_db": "xxxx"
+        }
+        return conf
