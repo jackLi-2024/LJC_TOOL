@@ -161,7 +161,7 @@ class OrmCrud():
     *** 主要简化多表联查的情况, 注意每个表都有附表***
     select_model: query模型，传入列表（模型名称）,注意查询ids时，模型列表中的第一个模型作为ids返回值
     select_field: query模型字段，针对只需要某一个字段，传入列表（模型名称.字段）
-    subquery: query子查询模型，subquery通过OrmCrud(**kwargs).deal_subquery_model()获取新子查询模型
+    subquery: query子查询模型，subquery通过OrmCrud(**kwargs).deal_subquery_model()获取新子查询模型 # 慎用
     outerjoin: 左外连接查询条件，注意模型的先后顺序,完全按照filter()语法，model2.field2 == model1.field1
     filter_eq_arguments: kwargs参数arguments中的字段，需要加入filter进行过滤(等值过滤)
     order_by_arguments: 参数sort_field字段，需要加入排序order_by进行排序
