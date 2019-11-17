@@ -346,7 +346,7 @@ class OrmCrud():
         return mid_model
 
     def deal_group_by(self, mid_model):
-        return mid_model.group_by(eval(self.group_by))
+        return mid_model.group_by(text(self.group_by))
 
     def deal_limit_offset(self, mid_model):
         return mid_model.limit(self.page_size).offset(
