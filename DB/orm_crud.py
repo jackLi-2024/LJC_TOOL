@@ -13,6 +13,8 @@ import os
 import sys
 import json
 
+import sqlalchemy
+
 try:
     reload(sys)
     sys.setdefaultencoding("utf8")
@@ -33,6 +35,7 @@ from contextlib import contextmanager
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy import text
+from sqlalchemy.sql.selectable import Alias
 from sqlalchemy import func
 from hashids import Hashids
 
@@ -134,7 +137,8 @@ try:
     host = Conf().ORM_HOST
     map_code = Conf().map_code
     table_replication = Conf().ORM_TABLE_REPLICATION
-except:
+except Exception as e:
+    logging.exception(e)
     # raise Exception("同级目录缺少配置文件config.py---[ORM_HOST,map_code,ORM_TABLE_REPLICATION]")
     host = "mysql+pymysql://xxx"
     map_code = {}
@@ -142,7 +146,6 @@ except:
 mysql = SqlDBOrm(host=host)
 session = mysql.get_session
 model = mysql.get_modelClass
-
 for m in model.__dir__():
     if m[0] == "_":
         continue
@@ -150,37 +153,51 @@ for m in model.__dir__():
     for i in range(1, table_replication + 1):
         exec("{}_{} = aliased({})".format(m, i, m))
 
+test_subquery = "必须是一个subquery对象"
+
 
 class OrmCrud():
     """
     *** 主要简化多表联查的情况, 注意每个表都有附表***
-    base_model: 查询基础模型名称，即数据库表名
-    join_model: 左外连接查询条件，注意模型的先后顺序,完全按照filter()语法，model2.field2 == model1.field1
-    filter_filed: kwargs参数arguments中的字段，需要加入filter进行过滤
-    sort_field ：参数sort_field字段，需要加入排序order_by进行排序
+    select_model: query模型，传入列表（模型名称）,注意查询ids时，模型列表中的第一个模型作为ids返回值
+    select_field: query模型字段，针对只需要某一个字段，传入列表（模型名称.字段）
+    subquery: query子查询模型，subquery通过OrmCrud(**kwargs).deal_subquery_model()获取新子查询模型
+    outerjoin: 左外连接查询条件，注意模型的先后顺序,完全按照filter()语法，model2.field2 == model1.field1
+    filter_eq_arguments: kwargs参数arguments中的字段，需要加入filter进行过滤(等值过滤)
+    order_by_arguments: 参数sort_field字段，需要加入排序order_by进行排序
+    group_by: 按某字段分组过滤
     special_filter: 特殊过滤条件,完全按照filter()语法，model2.field2 == model1.field1
     True_False_field: 查询的返回字段，进行汉化，例如 0 -- > 否 ，1 --> 是
-    map_field：意思同上，实现返回字段，进行汉化，例如 1000 --> 成功， 1001 --> 失败(映射关系一般来自数据字典)
+    map_field: 意思同上，实现返回字段，进行汉化，例如 1000 --> 成功， 1001 --> 失败(映射关系一般来自数据字典)
     样例：
-        base_model = "city"
-        join_model = {"province": ["province.id == city,id"]}
-        filter_filed = {"city":["name","latitude","lontitude"]}
-        sort_field = {"create_time": "city"}
-        special_filter = ["city.city_code == '400000'"]
+        select_model = ["pd_city", "pd_city_area"]
+        select_field = ["pd_city.id", "pd_city.create_time"]
+        subquery = []
+        outerjoin = {"pd_city_area": ["pd_city.id == pd_city_area.id"]}
+        filter_eq_arguments = {"pd_city": ["id"]}
+        order_by_arguments = {"create_time": "pd_city"}
+        group_by = "pd_city.id"
+        special_filter = ["pd_city.id != None"]
         True_False_field = ["is_delete"]
         map_field = ["status"]
+    测试用例:
+        kwargs = {"arguments": {"id": 1, "creat_time": ["2019-01-01", "2020-01-01"]}, "sort_field": "-create_time"}
+        a = OrmCrud(**kwargs).read()
+        print(json.dumps(a))
     """
-    base_model = ""
-    join_model = {}
-    filter_filed = {}
-    sort_field = {}
+    select_model = []
+    select_field = []
+    subquery = []
+    outerjoin = {}
+    filter_eq_arguments = {}
+    order_by_arguments = {}
+    group_by = ""
     special_filter = []
     True_False_field = []
     map_field = []
 
     def __init__(self, args=None, **kwargs):
         """
-
         :param args:  用于接受额外其他参数
         :param kwargs: 固定参数
             ｛
@@ -194,7 +211,7 @@ class OrmCrud():
         """
         self.page_num = kwargs.get("page_num", 1)
         self.page_size = kwargs.get("page_size", 10)
-        self.order_field = kwargs.get("order_field", "")
+        self.sort_field = kwargs.get("sort_field", {})
         self.arguments = kwargs.get("arguments", {})
         self.kwargs = kwargs
         self.args = args
@@ -249,15 +266,49 @@ class OrmCrud():
                 dic[k] = v
         return dic
 
-    def deal_filter_field(self):
-        """
-        filter_filed = {
-            "model_name":["field1","field2"]
-            }
-        :return:
-        """
+    def field_to_dict(self, *args):
+        dic = {}
+        for i in range(len(args)):
+            k = self.select_field[i]
+            v = args[i]
+            if isinstance(v, datetime):
+                v = v.strftime("%Y-%m-%d %H:%M:%S")
+                dic[k] = v
+            elif isinstance(v, decimal.Decimal):
+                dic[k] = float(v)
+            elif k in self.True_False_field:
+                if v == 0 or v == "0":
+                    dic[k] = v
+                    dic["{}_value".format(k)] = "否"
+                elif v == 1 or v == "1":
+                    dic[k] = v
+                    dic["{}_value".format(k)] = "是"
+                else:
+                    dic[k] = v
+            elif k in self.map_field:
+                if v in map_code:
+                    dic[k] = v
+                    dic["{}_value".format(k)] = map_code[v]
+                else:
+                    dic[k] = v
+            else:
+                dic[k] = v
+        return dic
+
+    def subquery_to_dict(self, *args):
+        result = []
+        for i in range(len(args)):
+            v = args[i]
+            if isinstance(v, datetime):
+                v = v.strftime("%Y-%m-%d %H:%M:%S")
+                result.append(v)
+            elif isinstance(v, decimal.Decimal):
+                result.append(float(v))
+        return {"subquery_result": result}
+
+    def deal_filter(self):
         actions = []
-        for k, v in self.filter_filed.items():
+        for k, v in self.filter_eq_arguments.items():
             for one in v:
                 if self.arguments.get(one) != None and type(self.arguments.get(one)) != list:
                     actions.append(eval("{}.{}".format(k, one)) == self.arguments.get(one))
@@ -265,48 +316,68 @@ class OrmCrud():
                         self.arguments.get(one)) == 2:
                     actions.append(eval("{}.{}".format(k, one)) >= self.arguments.get(one)[0])
                     actions.append(eval("{}.{}".format(k, one)) <= self.arguments.get(one)[1])
+        for one in self.special_filter:
+            if type(one) == str:
+                actions.append(eval(one))
+            else:
+                logging.debug("special_filter error 【{}】".format(one))
         return actions
 
-    def deal_order_field(self):
-        """
-        sort_field = {
-            "field":"model_name"
-            }
-        :return:
-        """
-        for k, v in self.order_field.items():
+    def deal_order(self):
+        for k, v in self.order_by_arguments.items():
             if self.sort_field and type(self.sort_field) == str:
                 if self.sort_field[1:] == k:
                     return text("{}{}.{}".format(self.sort_field[0], v, self.sort_field[1:]))
         return text("")
 
-    def deal_read_model(self):
-        if not self.base_model:
-            raise Exception("base_model can't be null")
-        join_models = []
-        for i in list(self.join_model.keys()):
-            join_models.append(eval(i))
-        filter_condition = self.deal_filter_field()
-        for one in self.special_filter:
-            filter_condition.append(eval(one))
-        new_model = session.query(eval(self.base_model), *join_models).filter(*filter_condition)
-        for k, v in self.join_model.items():
-            for i in v:
-                new_model = new_model.outerjoin(eval(k), eval(i))
-        new_model = new_model.order_by(self.deal_order_field()).limit(self.page_size).offset(
+    def deal_select_from(self):
+        select_models = []
+        select_fields = []
+        for select in self.select_model:
+            select_models.append(eval(select))
+        for select in self.select_field:
+            select_fields.append(eval(select))
+        return select_models + select_fields + self.subquery
+
+    def deal_outerjoin(self, mid_model):
+        for k, v in self.outerjoin.items():
+            for c in v:
+                mid_model = mid_model.outerjoin(eval(k), eval(c))
+        return mid_model
+
+    def deal_group_by(self, mid_model):
+        return mid_model.group_by(eval(self.group_by))
+
+    def deal_limit_offset(self, mid_model):
+        return mid_model.limit(self.page_size).offset(
             (self.page_num - 1) * self.page_size)
-        return new_model
+
+    def deal_read_model(self):
+        mid_model = session.query(*self.deal_select_from()).filter(*self.deal_filter())
+        mid_model = self.deal_outerjoin(mid_model)
+        mid_model = self.deal_group_by(mid_model)
+        mid_model = mid_model.order_by(self.deal_order())
+        mid_model = self.deal_limit_offset(mid_model)
+        return mid_model
+
+    def deal_subquery_model(self):
+        mid_model = session.query(*self.deal_select_from()).filter(*self.deal_filter())
+        mid_model = self.deal_outerjoin(mid_model)
+        mid_model = self.deal_group_by(mid_model)
+        mid_model = mid_model.order_by(self.deal_order()).subquery()
+        return mid_model
 
     @property
     def ids(self):
         """
         :return: 查询的ids
         """
+        if not self.select_model:
+            raise Exception("查询ids列表，select_model不能为空")
         ids_ = []
         result = self.read()
         for i in result:
-            for j in i:
-                ids_.append(j.get("id"))
+            ids_.append(i[0].get("id"))
         return ids_
 
     @property
@@ -314,20 +385,29 @@ class OrmCrud():
         """
         :return: 查询的数量
         """
-        new_model = self.deal_read_model()
-        return new_model.count()
+        mid_model = self.deal_read_model()
+        return mid_model.count()
 
     def read(self):
         """读操作"""
-        new_model = self.deal_read_model()
-        result = new_model.all()
+        mid_model = self.deal_read_model()
+        result = mid_model.all()
+        select_model_length = len(self.select_model)
+        select_field_length = len(self.select_field)
+        subquery_length = len(self.subquery)
         out = []
         for info in result:
             middle = []
-            if not self.join_model:
+            if select_model_length + select_field_length + subquery_length < 2:
                 info = [info]
-            for m in info:
-                middle.append(self.attr_to_dict(m))
+            for model in info[:select_model_length]:
+                middle.append(self.attr_to_dict(model))
+            if select_field_length:
+                middle.append(self.field_to_dict(*info[select_model_length:select_field_length + select_model_length]))
+            if subquery_length:
+                middle.append(self.subquery_to_dict(*info[
+                                                     select_field_length + select_model_length:
+                                                     select_field_length + select_model_length + subquery_length]))
             out.append(middle)
         return out
 
@@ -379,3 +459,4 @@ class OrmCrud():
         # print(res)
         # print(self.deal_filter_field())
         print(self.read())
+
