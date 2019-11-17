@@ -304,6 +304,8 @@ class OrmCrud():
                 result.append(v)
             elif isinstance(v, decimal.Decimal):
                 result.append(float(v))
+            else:
+                result.append(v)
         return {"subquery_result": result}
 
     def deal_filter(self):
