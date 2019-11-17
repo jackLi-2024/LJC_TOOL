@@ -407,9 +407,7 @@ class OrmCrud():
             if select_field_length:
                 middle.append(self.field_to_dict(*info[select_model_length:select_field_length + select_model_length]))
             if subquery_length:
-                middle.append(self.subquery_to_dict(*info[
-                                                     select_field_length + select_model_length:
-                                                     select_field_length + select_model_length + subquery_length]))
+                middle.append(self.subquery_to_dict(*info[select_field_length + select_model_length:]))
             out.append(middle)
         return out
 
