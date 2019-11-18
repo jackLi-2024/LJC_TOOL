@@ -190,6 +190,7 @@ class OrmCrud():
     subquery = []
     outerjoin = {}
     filter_eq_arguments = {}
+    filter_like_arguments = {}
     order_by_arguments = {}
     group_by = ""
     special_filter = []
@@ -323,6 +324,12 @@ class OrmCrud():
                 actions.append(eval(one))
             else:
                 logging.debug("special_filter error 【{}】".format(one))
+
+        for k, v in self.filter_like_arguments.items():
+            for one in v:
+                if self.arguments.get(one) != None and type(self.arguments.get(one)) != list:
+                    actions.append(eval("{}.{}.like('%{}%')".format(k, one, self.arguments.get(one))))
+                
         return actions
 
     def deal_order(self):
