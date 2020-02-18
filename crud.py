@@ -337,6 +337,10 @@ class MySQLCrud(SQL, MySQLDB, RandomString):
         try:
             data = self.dealer()
             self.commit()
+            try:
+                self.close()
+            except:
+                pass
         except Exception as e:
             try:
                 self.rollback()
